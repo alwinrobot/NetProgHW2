@@ -22,7 +22,6 @@
 #define ACK 0x04
 #define ERROR 0x05
 
-
 #define BUFFER_LENGTH 516
 #define DATA_SIZE 512
 #define SEND_TIMEOUT 1000
@@ -49,16 +48,17 @@ int send_file(int socket_fd, struct sockaddr_in *client_addr, char* file_name) {
 void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode_ptr, int tid) {
 
 	// variables
-	int sock_fd, len, opcode, n, datasize;
+	int sock_fd, len, opcode, n, datasize, errno, recv;
+	struct sockaddr_in client_data;
 	socklen_t client_length;
 	unsigned short int count = 0;
 	unsigned short int rcount = 0;
 
 	unsigned char file_buffer[BUFFER_LENGTH + 1];
-	unsigned char packet_buffer[BUFFER_LENGTH + 12];
+	unsigned char packet_buffer[BUFFER_LENGTH + 12]; // used to send 
 	char file_name[23], mode[12], path[128], ack_buf[512];
-	char* buf_ptr++;
-	FILE* pf;
+	char* buf_ptr;
+	FILE* fp;
 
 	strcpy(file_name, file_name_ptr);
 	strcpy(mode, mode_ptr);
@@ -74,11 +74,13 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 		return ;
 	}
 
-	pf = fopen(file_name, "w");
+	fp = fopen(file_name, "w");
 
-	if (pf == NULL) {
+	if (fp == NULL) {
 
 		// null file pointer
+		printf("NULL File\n");
+		return;
 	}
 
 	
@@ -96,179 +98,121 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 		     
 
 		    if (count == 0 || (count % 1) == 0 || n != BUFFER_LENGTH) {
-				len = sprintf(ack_buf, "%c%c%c%c", 0x00, 0x04, 0x00, 0x00);
+				len = sprintf(ack_buf, "%c%c%c%c", 0x00, ACK, 0x00, 0x00);
 				ack_buf[2] = (count & 0xFF00) >> 8;	
-				ack_buf[3] = (count & 0x00FF);	//fill in the lower part of the count
-			  
+				ack_buf[3] = (count & 0x00FF);
+			} 
 
-			if (sendto(sock, ack_buf, len, 0, (struct sockaddr *) &client, sizeof(client)) != len)
-			    {
-			      if (debug)
-				printf ("Mismatch in number of sent bytes\n");
-			      return;
-			    }
+			if (sendto(sock, ack_buf, len, 0, (struct sockaddr *) &client, sizeof(client)) != len) {
+				perror("Wrong number of bytes sent!\n");
+				return;
 			}
-		      else if (debug)
-			{
-			  printf ("No ack required on packet count %d\n", count);
+
+
+		    if (n != BUFFER_LENGTH) {
+
+		    	printf("Wrong length\n");
+				return;
 			}
-		      if (n != (datasize + 4))	/* remember if our datasize is less than a full packet this was the last packet to be received */
-			{
-			  if (debug)
-			    printf
-			      ("Last chunk detected (file chunk size: %d). exiting while loop\n",
-			       n - 4);
-			  goto done;		/* gotos are not optimal, but a good solution when exiting a multi-layer loop */
+
+		    count++;
+			client_length = sizeof(client_data);
+
+			errno = EAGAIN;	/* this allows us to enter the loop */
+			n = -1;
+			while (i <= RECV_TIMEOUT && errno == EAGAIN && & n < 0) {
+
+				// receive from packet
+			    n = recvfrom (sock_fd, packet_buffer, sizeof(packet_buffer) - 1, 0, (struct sockaddr *) &data, (socklen_t *) & lient_len);
+			    usleep (1000);
 			}
-		      memset (filebuf, 0, sizeof (filebuf));
-		      count++;
 
-		      for (j = 0; j < RETRIES; j++)	/* this allows us to loop until we either break out by getting the correct ack OR time out because we've looped more than RETRIES times */
-			{
-			  client_len = sizeof (data);
-			  errno = EAGAIN;	/* this allows us to enter the loop */
-			  n = -1;
-			  for (i = 0; errno == EAGAIN && i <= TIMEOUT && n < 0; i++)	/* this for loop will just keep checking the non-blocking socket until timeout */
-			    {
+			// no timeout
+			if (n < 0) {
+				printf ("The server could not receive from the client\n");
+				exit(1);
 
-			      n =
-				recvfrom (sock, packetbuf, sizeof (packetbuf) - 1,
-					  MSG_DONTWAIT, (struct sockaddr *) &data,
-					  (socklen_t *) & client_len);
-			      /*if (debug)
-			         printf ("The value recieved is n: %d\n",n); */
-			      usleep (1000);
-			    }
+			}
+			else {
 
-			  if (n < 0 && errno != EAGAIN)	/* this will be true when there is an error that isn't the WOULD BLOCK error */
-			    {
-			      if (debug)
-				printf
-				  ("The server could not receive from the client (errno: %d n: %d)\n",
-				   errno, n);
 
-			      //resend packet
-			    }
-			  else if (n < 0 && errno == EAGAIN)	/* this is true when the error IS would block. This means we timed out */
-			    {
-			      if (debug)
-				printf ("Timeout waiting for data (errno: %d == %d n: %d)\n",
-					errno, EAGAIN, n);
-			      //resend packet
-
-			    }
-			  else
-			    {
-			      if (client.sin_addr.s_addr != data.sin_addr.s_addr)	/* checks to ensure get from ip is same from ACK IP */
-				{
-				  if (debug)
-				    printf
-				      ("Error recieving file (data from invalid address)\n");
-				  j--;
-				  continue;	/* we aren't going to let another connection spoil our first connection */
+			    if (client_addr.sin_addr.s_addr != client_data.sin_addr.s_addr) {
+				    printf("Error recieving file (data from invalid address)\n");
+				    return;
 				}
 
-			      if (tid != ntohs (client.sin_port))	/* checks to ensure get from the correct TID */
-				{
-				  if (debug)
+			    if (tid != ntohs (client.sin_port))	{
 				    printf ("Error recieving file (data from invalid tid)\n");
-				  len = sprintf ((char *) packetbuf,
-						 "%c%c%c%cBad/Unknown TID%c",
-						 0x00, 0x05, 0x00, 0x05, 0x00);
-				  if (sendto (sock, packetbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)	/* send the data packet */
-				    {
-				      printf
-					("Mismatch in number of sent bytes while trying to send mode error packet\n");
+				    
+				    len = sprintf ((char *) packet_buffer, "%c%c%c%cBad/Unknown TID%c", 0x00, ERROR, 0x00, 0x05, 0x00);
+				    
+				    if (sendto(sock, packet_buffer, len, 0, (struct sockaddr *) &client_addr, sizeof(client_addr)) != len) {
+				    	printf("Could not send error packet\n");
+				    	return;
 				    }
-				  j--;
-
-				  continue;	/* we aren't going to let another connection spoil our first connection */
 				}
-		/* this formatting code is just like the code in the main function */
-			      bufindex = (char *) packetbuf;	//start our pointer going
-			      if (bufindex++[0] != 0x00)
-				printf ("bad first nullbyte!\n");
-			      opcode = *bufindex++;
-			      rcount = *bufindex++ << 8;
-			      rcount &= 0xff00;
-			      rcount += (*bufindex++ & 0x00ff);
+				// format the buffer
+			    bu_ptr = (char *) packet_buffer;
 
-
-
-			      memcpy ((char *) filebuf, bufindex, n - 4);	/* copy the rest of the packet (data portion) into our data array */
-			      if (debug)
-				printf
-				  ("Remote host sent data packet #%d (Opcode: %d packetsize: %d filechunksize: %d)\n",
-				   rcount, opcode, n, n - 4);
-			      if (flag)
-				{
-				  if (n > 516)
-				    datasize = n - 4;
-				  flag = 0;
+			   	if (buf_ptr++[0] != 0x00) {
+					printf("Packet must begin with 0x00\n");
+					return;
 				}
-			      if (opcode != 3 || rcount != count)	/* ack packet should have code 3 (data) and should be ack+1 the packet we just sent */
-				{
-				  if (debug)
-				    printf
-				      ("Badly ordered/invalid data packet (Got OP: %d Block: %d) (Wanted Op: 3 Block: %d)\n",
-				       opcode, rcount, count);
-		/* sending error message */
-				  if (opcode > 5)
-				    {
-				      len = sprintf ((char *) packetbuf,
-						     "%c%c%c%cIllegal operation%c",
-						     0x00, 0x05, 0x00, 0x04, 0x00);
-				      if (sendto (sock, packetbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)	/* send the data packet */
-					{
-					  printf
-					    ("Mismatch in number of sent bytes while trying to send mode error packet\n");
+			    opcode = *bufindex++;
+		        rcount = *bufindex++ << 8;
+		      	rcount &= 0xff00;
+		      	rcount += (*bufindex++ & 0x00ff);
+
+
+
+			    memcpy((char *) filebuf, buf_ptr, n - 4);	/* copy the rest of the packet (data portion) into our data array */
+			    if (flag) {
+					if (n > 516)
+				    	datasize = n - 4;
+				  	flag = 0;
+				}
+			    if (opcode != 3 || rcount != count) {
+			    	printf("Badly ordered/invalid data packet, sending error packet\n");
+
+	/* sending error message */
+			  		if (opcode > 5) {
+					    len = sprintf ((char *) packet_buffer, "%c%c%c%cIllegal operation%c", 0x00, ERROR, 0x00, 0x04, 0x00);
+					    
+					    if (sendto(sock_fd, packet_buffer, len, 0, (struct sockaddr *) &client, sizeof(client)) != len) {
+						    printf("Could not send error packet\n");
+						    return;
+						}
 					}
-				    }
-
 				}
-			      else
-				{
-				  break;
+
+			    else {
+					break;
 				}
-			    }
+			    
 
 
-			  if (sendto
-			      (sock, ack_buf, len, 0, (struct sockaddr *) &client,
-			       sizeof (client)) != len)
-			    {
-			      if (debug)
-				printf ("Mismatch in number of sent bytes\n");
-			      return;
-			    }
+				if (sendto(sock, ack_buf, len, 0, (struct sockaddr *) &client_addr, sizeof (client_addr)) != len) {
+
+					printf ("Mismatch in number of sent bytes\n");
+				    return;
+				}
 
 			}
-		      if (j == RETRIES)
-			{
-			  if (debug)
-			    printf ("Data recieve Timeout. Aborting transfer\n");
-			  fclose (fp);
 
-			  return;
-			}
 
-		    }
+		} while (fwrite(file_buffer, 1, n - 4, fp) == n - 4);
+		
+		fclose (fp);
+		sync();
+		printf ("fclose and sync successful. File failed to recieve properly\n");
+		return;
 
-		  while (fwrite (filebuf, 1, n - 4, fp) == n - 4);	/* if it doesn't write the file the length of the packet received less 4 then it didn't work */
-		  fclose (fp);
-		  sync ();
-		  if (debug)
-		    printf ("fclose and sync successful. File failed to recieve properly\n");
-		  return;
 
-		done:
+		fclose (fp);
+		sync ();
+		printf ("fclose and sync successful. File received successfully\n");
 
-		  fclose (fp);
-		  sync ();
-		  if (debug)
-		    printf ("fclose and sync successful. File received successfully\n");
-
-		  return;
+	  	return;
 	}
 }
 

@@ -397,10 +397,6 @@ tget (char *pFilename, struct sockaddr_in client, char *pMode, int tid)
 	  if (n < 0 && errno != EAGAIN)	/* this will be true when there is an error that isn't the WOULD BLOCK error */
 	    {
 	      if (debug)
-		printf
-		  ("The server could not receive from the client (errno: %d n: %d)\n",
-		   errno, n);
-
 	      //resend packet
 	    }
 	  else if (n < 0 && errno == EAGAIN)	/* this is true when the error IS would block. This means we timed out */
@@ -431,8 +427,7 @@ tget (char *pFilename, struct sockaddr_in client, char *pMode, int tid)
 				 0x00, 0x05, 0x00, 0x05, 0x00);
 		  if (sendto (sock, packetbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)	/* send the data packet */
 		    {
-		      printf
-			("Mismatch in number of sent bytes while trying to send mode error packet\n");
+		      printf("Mismatch in number of sent bytes while trying to send mode error packet\n");
 		    }
 		  j--;
 
