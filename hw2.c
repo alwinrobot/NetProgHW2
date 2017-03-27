@@ -44,6 +44,153 @@ int send_file(int socket_fd, struct sockaddr_in *client_addr, char* file_name) {
 	return 0;
 }
 */
+void send_packet(char* file_name_ptr, struct sockaddr_in client_addr, char *mode_ptr, int tid)
+{
+	int sock_fd, len, client_len, opcode, ssize = 0, n, i, j, bcount = 0;
+  	unsigned short int count = 0, rcount = 0, acked = 0;
+  	unsigned char filebuf[MAXDATASIZE + 1];
+  	unsigned char packetbuf[MAXACKFREQ][MAXDATASIZE + 12],
+    recvbuf[MAXDATASIZE + 12];
+  	char filename[23], mode[12], fullpath[196], *bufindex;
+  	struct sockaddr_in ack;
+
+  	FILE *fp;			/* pointer to the file we will be sending */
+
+  	strcpy (filename, file_name_ptr);	//copy the pointer to the filename into a real array
+  	strcpy (mode, mode_ptr);		//same as above
+
+  	printf("branched to file send function\n");
+
+  	if ((sock = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)	//startup a socket
+    {
+      printf ("Server reconnect for sending did not work correctly\n");
+      return;
+    }
+
+    //look for illegal characters in filename
+    //code here
+
+    fp = open(filename);
+    //check for if the filename is null
+    //code here
+
+   	printf ("Sending file... (source: %s)\n", filename);
+
+   	memset (filebuf, 0, sizeof (filebuf));
+   	while(1)
+   	{
+   		acked = 0;
+   		ssize = fread (filebuf, 1, datasize, fp);
+
+   		count++; //count number of datasize byte portions we read from the file
+   		if(count == 1) //we always look for an ack on the first packet
+   			bcount = 0;  
+   		else if (count == 2) // second packet will start our count at zero
+   			bcount = 0
+   		else
+   			bcount = (count - 2) % ackfreq;
+
+   		sprintf((char*) packetbuf[], "%c%c%c%c", 0x00, 0x03, 0x00, 0x00);
+    	memcpy ((char *) packetbuf[bcount] + 4, filebuf, ssize);
+
+    	len = 4 + ssize;
+    	packetbuf[bcount][2] = (count & 0xFF00) >> 8;	//fill in the count (top number first)
+      	packetbuf[bcount][3] = (count & 0x00FF);	//fill in the lower part of the count
+
+      	printf("Sending packets # %04d (length: %d file chunk: %d)\n", count, len, ssize);
+
+      	if (sendto(sock, packetbuf[], len, 0, (struct sockaddr) &client, sizeof(client)) != len )
+      	{
+      		printf("Mismatch in number of bytes sent\n");
+      		return;
+      	}
+      	if ((count - 1) == 0 || ((count - 1) % ackfreq) == 0 || ssize != datasize)
+		{
+      	  client_len = sizeof (data);
+		  errno = EAGAIN;	/* this allows us to enter the loop */
+		  n = -1;
+		  for (i = 0; errno == EAGAIN && i <= TIMEOUT && n < 0; i++)	/* this for loop will just keep checking the non-blocking socket until timeout */
+		    {
+		      n = recvfrom (sock, packetbuf, sizeof (packetbuf) - 1, MSG_DONTWAIT, (struct sockaddr *) &data, (socklen_t *) & client_len);
+		      usleep (1000);
+		    }
+
+		  if (n < 0 && errno != EAGAIN)	/* this will be true when there is an error that isn't the WOULD BLOCK error */
+		    {
+				printf("The server could not receive from the client (errno: %d n: %d)\n", errno, n); //resend packet
+		    }
+		  else if (n < 0 && errno == EAGAIN)	/* this is true when the error IS would block. This means we timed out */
+		    {
+				printf ("Timeout waiting for data (errno: %d == %d n: %d)\n", errno, EAGAIN, n); //resend packet
+		    }
+		  else
+		    {
+		      if (tid != ntohs (client.sin_port))	/* checks to ensure get from the correct TID */
+			{
+			  printf ("Error recieving file (data from invalid tid)\n");
+			  len = sprintf ((char *) packetbuf, "%c%c%c%cBad/Unknown TID%c", 0x00, 0x05, 0x00, 0x05, 0x00);
+			  if (sendto (sock, packetbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)	/* send the data packet */
+			    {
+			      printf("Mismatch in number of sent bytes while trying to send mode error packet\n");
+			    }
+			}
+			  bufindex = (char *) recvbuf;	//start our pointer going
+		  if (bufindex++[0] != 0x00)
+		    printf ("bad first nullbyte!\n");
+		  opcode = *bufindex++;
+
+		  rcount = *bufindex++ << 8;
+		  rcount &= 0xff00;
+		  rcount += (*bufindex++ & 0x00ff);
+		  if (opcode != 4 || rcount != count)	/* ack packet should have code 4 (ack) and should be acking the packet we just sent */
+		    {
+		      if (debug)
+			printf
+			  ("Remote host failed to ACK proper data packet # %d (got OP: %d Block: %d)\n", count, opcode, rcount);
+/* sending error message */
+		      if (opcode > 5)
+			{
+			  len = sprintf ((char *) recvbuf, "%c%c%c%cIllegal operation%c", 0x00, 0x05, 0x00, 0x04, 0x00);
+			  if (sendto (sock, recvbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)	/* send the data packet */
+			    {
+			      printf ("Mismatch in number of sent bytes while trying to send mode error packet\n");
+			    }
+			}
+		      /* from here we will loop back and resend */
+		    }
+		  else
+		    {
+			printf ("Remote host successfully ACK'd (#%d)\n", rcount);
+		      break;
+		    }
+		}
+	      for (i = 0; i <= bcount; i++)
+		{
+		  if (sendto (sock, packetbuf[i], len, 0, (struct sockaddr *) &client, sizeof (client)) != len)	/* resend the data packet */
+		    {
+			printf ("Mismatch in number of sent bytes\n");
+		      return;
+		    }
+		    printf ("Ack(s) lost. Resending: %d\n", count - bcount + i);
+		}
+		printf ("Ack(s) lost. Resending complete.\n");
+
+/* The ack sending 'for' loop ends here */
+
+	}
+      
+   	 if (ssize != datasize)
+		break;
+
+      memset (filebuf, 0, sizeof (filebuf));	/* fill the filebuf with zeros so that when the fread fills it, it is a null terminated string */
+    }
+
+  	fclose (fp);
+  	printf ("File sent successfully\n");
+	return;
+}
+
+
 
 void get_packet(char* file_name_ptr, struct sockaddr_in client_addr, char* mode_ptr, int tid) {
 
