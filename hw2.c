@@ -45,7 +45,7 @@ int send_file(int socket_fd, struct sockaddr_in *client_addr, char* file_name) {
 }
 */
 
-void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode_ptr, int tid) {
+void get_packet(char* file_name_ptr, struct sockaddr_in client_addr, char* mode_ptr, int tid) {
 
 	// variables
 	int sock_fd, len, opcode, n, datasize, errno, recv;
@@ -103,7 +103,7 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 				ack_buf[3] = (count & 0x00FF);
 			} 
 
-			if (sendto(sock, ack_buf, len, 0, (struct sockaddr *) &client, sizeof(client)) != len) {
+			if (sendto(sock, ack_buf, len, 0, (struct sockaddr *) &client_addr, sizeof(client_addr)) != len) {
 				perror("Wrong number of bytes sent!\n");
 				return;
 			}
@@ -123,7 +123,7 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 			while (i <= RECV_TIMEOUT && errno == EAGAIN && & n < 0) {
 
 				// receive from packet
-			    n = recvfrom (sock_fd, packet_buffer, sizeof(packet_buffer) - 1, 0, (struct sockaddr *) &data, (socklen_t *) & lient_len);
+			    n = recvfrom (sock_fd, packet_buffer, sizeof(packet_buffer) - 1, 0, (struct sockaddr *) &client_data, client_length);
 			    usleep (1000);
 			}
 
@@ -141,7 +141,7 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 				    return;
 				}
 
-			    if (tid != ntohs (client.sin_port))	{
+			    if (tid != ntohs (client_addr.sin_port))	{
 				    printf ("Error recieving file (data from invalid tid)\n");
 				    
 				    len = sprintf ((char *) packet_buffer, "%c%c%c%cBad/Unknown TID%c", 0x00, ERROR, 0x00, 0x05, 0x00);
@@ -166,10 +166,11 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 
 
 			    memcpy((char *) filebuf, buf_ptr, n - 4);	/* copy the rest of the packet (data portion) into our data array */
-			    if (flag) {
-					if (n > 516)
-				    	datasize = n - 4;
-				  	flag = 0;
+	
+				if (n > 516) {
+					datasize = n - 4;
+				}
+			    	
 				}
 			    if (opcode != 3 || rcount != count) {
 			    	printf("Badly ordered/invalid data packet, sending error packet\n");
@@ -201,11 +202,7 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 
 
 		} while (fwrite(file_buffer, 1, n - 4, fp) == n - 4);
-		
-		fclose (fp);
-		sync();
-		printf ("fclose and sync successful. File failed to recieve properly\n");
-		return;
+	
 
 
 		fclose (fp);
@@ -214,19 +211,6 @@ void get_packet(char* file_name_ptr, struct sockaddr_int client_addr, char* mode
 
 	  	return;
 	}
-}
-
-void send_packet(char* file_name, struct sockaddr_int client_addr, char* mode, int tid) {
-	
-	// variables
-	int sock_fd, len, opcode;
-	socklen_t client_length;
-
-	unsigned char file_buffer[BUFFER_LENGTH + 1];
-	unsigned char packet_buffer[BUFFER_LENGTH + 12];
-	char file_name[23], mode[12], path[128], ack_buf[512];
-	char* buf_ptr++;
-	FILE* pf;
 }
 
 int main() {
@@ -311,7 +295,7 @@ int main() {
 	while (1) {
 
 		
-		new_fd = recvfrom(socket_fd, buf, BUFFER_LENGTH, 0, (struct sockaddr *) &client_addr, client_length);
+		new_fd = recvfrom(socket_fd, buf, BUFFER_LENGTH, 0, (struct sockaddr_in *) &client_addr, client_length);
 
 		if (new_fd < 0) {
 			perror("Could not receive client request\n");
@@ -359,7 +343,7 @@ int main() {
 
 					get_packet(file_name, client_addr, mode, tid);
 
-					sendto(socket_fd, buf, BUFFER_LENGTH, 0, (struct sockaddr *) &client_addr, client_length);
+					sendto(socket_fd, buf, BUFFER_LENGTH, 0, (struct sockaddr_in *) &client_addr, &client_length);
 
 					close(child_fd);
 					exit(0);
